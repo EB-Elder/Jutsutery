@@ -21,21 +21,11 @@ string weightsFile = "hand/pose_iter_102000.caffemodel";
 
 int nPoints = 22;
 
-vector<Point2f> prevPoints;
-/*vector<Point2f> nextPoints;
-Mat prevInput;*/
-
-
-void detectPoints(Mat& img)
-{
-    cv::goodFeaturesToTrack(img, prevPoints, 50, 0.000001, 100);
-}
-
-int main(int argc, char** argv)
+int main(int argc, char **argv)
 {
     float thresh = 0.01;
 
-    cv::VideoCapture cap(1);
+    cv::VideoCapture cap("asl.mp4");
 
     if (!cap.isOpened())
     {
@@ -46,26 +36,26 @@ int main(int argc, char** argv)
     Mat frame, frameCopy;
     int frameWidth = cap.get(CAP_PROP_FRAME_WIDTH);
     int frameHeight = cap.get(CAP_PROP_FRAME_HEIGHT);
-    float aspect_ratio = frameWidth / (float)frameHeight;
+    float aspect_ratio = frameWidth/(float)frameHeight;
     int inHeight = 64;
-    int inWidth = (int(aspect_ratio * inHeight) * 8) / 8;
+    int inWidth = (int(aspect_ratio*inHeight) * 8) / 8;
 
     cout << "inWidth = " << inWidth << " ; inHeight = " << inHeight << endl;
 
-    VideoWriter video("Output-Skeleton.avi", VideoWriter::fourcc('M', 'J', 'P', 'G'), 10, Size(frameWidth, frameHeight));
+    VideoWriter video("Output-Skeleton.avi",VideoWriter::fourcc('M','J','P','G'), 10, Size(frameWidth,frameHeight));
 
     Net net = readNetFromCaffe(protoFile, weightsFile);
 
-    double t = 0;
-    while (1)
+    double t=0;
+    while(1)
     {
-        double t = (double)cv::getTickCount();
+        double t = (double) cv::getTickCount();
 
         cap >> frame;
         frameCopy = frame.clone();
         Mat inpBlob = blobFromImage(frame, 1.0 / 255, Size(inWidth, inHeight), Scalar(0, 0, 0), false, false);
 
-        /*net.setInput(inpBlob);
+        net.setInput(inpBlob);
 
         Mat output = net.forward();
 
@@ -74,10 +64,10 @@ int main(int argc, char** argv)
 
         // find the position of the body parts
         vector<Point> points(nPoints);
-        for (int n = 0; n < nPoints; n++)
+        for (int n=0; n < nPoints; n++)
         {
             // Probability map of corresponding body's part.
-            Mat probMap(H, W, CV_32F, output.ptr(0, n));
+            Mat probMap(H, W, CV_32F, output.ptr(0,n));
             resize(probMap, probMap, Size(frameWidth, frameHeight));
 
             Point maxLoc;
@@ -85,14 +75,14 @@ int main(int argc, char** argv)
             minMaxLoc(probMap, 0, &prob, 0, &maxLoc);
             if (prob > thresh)
             {
-                circle(frameCopy, cv::Point((int)maxLoc.x, (int)maxLoc.y), 8, Scalar(0, 255, 255), -1);
+                circle(frameCopy, cv::Point((int)maxLoc.x, (int)maxLoc.y), 8, Scalar(0,255,255), -1);
                 cv::putText(frameCopy, cv::format("%d", n), cv::Point((int)maxLoc.x, (int)maxLoc.y), cv::FONT_HERSHEY_COMPLEX, 1, cv::Scalar(0, 0, 255), 2);
 
             }
             points[n] = maxLoc;
         }
 
-        int nPairs = sizeof(POSE_PAIRS) / sizeof(POSE_PAIRS[0]);
+        int nPairs = sizeof(POSE_PAIRS)/sizeof(POSE_PAIRS[0]);
 
         for (int n = 0; n < nPairs; n++)
         {
@@ -100,37 +90,22 @@ int main(int argc, char** argv)
             Point2f partA = points[POSE_PAIRS[n][0]];
             Point2f partB = points[POSE_PAIRS[n][1]];
 
-            if (partA.x <= 0 || partA.y <= 0 || partB.x <= 0 || partB.y <= 0)
+            if (partA.x<=0 || partA.y<=0 || partB.x<=0 || partB.y<=0)
                 continue;
 
-            line(frame, partA, partB, Scalar(0, 255, 255), 8);
-            circle(frame, partA, 8, Scalar(0, 0, 255), -1);
-            circle(frame, partB, 8, Scalar(0, 0, 255), -1);
-        }*/
-
-        cvtColor(frameCopy, frameCopy, COLOR_BGR2GRAY);
-        detectPoints(frameCopy);
-
-        for (size_t i = 0; i < prevPoints.size(); i++)
-        {
-            circle(frame, prevPoints[i], 10, Scalar(0, 0, 255));
+            line(frame, partA, partB, Scalar(0,255,255), 8);
+            circle(frame, partA, 8, Scalar(0,0,255), -1);
+            circle(frame, partB, 8, Scalar(0,0,255), -1);
         }
 
-        cvtColor(frameCopy, frame, COLOR_GRAY2BGR);
-        for (size_t i = 0; i < prevPoints.size(); i++)
-        {
-            circle(frame, prevPoints[i], 10, Scalar(0, 0, 255));
-        }
-        //circle(frame, prevPoints[0], 1, Scalar(0, 0, 255));
-
-        t = ((double)cv::getTickCount() - t) / cv::getTickFrequency();
+        t = ((double)cv::getTickCount() - t)/cv::getTickFrequency();
         cout << "Time Taken for frame = " << t << endl;
         cv::putText(frame, cv::format("time taken = %.2f sec", t), cv::Point(50, 50), cv::FONT_HERSHEY_COMPLEX, .8, cv::Scalar(255, 50, 0), 2);
         // imshow("Output-Keypoints", frameCopy);
         imshow("Output-Skeleton", frame);
         video.write(frame);
         char key = waitKey(1);
-        if (key == 27)
+        if (key==27)
             break;
     }
     // When everything done, release the video capture and write object

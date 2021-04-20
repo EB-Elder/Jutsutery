@@ -436,3 +436,9 @@ API
 Training
 Blog
 About
+
+
+*.prototxt
+*.caffemodel
+*.avi
+*.jpg
