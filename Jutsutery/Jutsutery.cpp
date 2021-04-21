@@ -1,6 +1,9 @@
 #include <opencv2/dnn.hpp>
 #include <opencv2/imgproc.hpp>
 #include <opencv2/highgui.hpp>
+#include <opencv2/videoio.hpp>
+#include <opencv2/video.hpp>
+#include <opencv2/core.hpp>
 #include <iostream>
 
 using namespace std;
@@ -22,13 +25,44 @@ string weightsFile = "hand/pose_iter_102000.caffemodel";
 int nPoints = 22;
 
 vector<Point2f> prevPoints;
-/*vector<Point2f> nextPoints;
-Mat prevInput;*/
+vector<Point2f> nextPoints;
+Mat prevInput;
+Mat nextInput, frameCopy;
+vector<uchar> status;
+vector<float> err;
+
 
 
 void detectPoints(Mat& img)
 {
-    cv::goodFeaturesToTrack(img, prevPoints, 50, 0.000001, 100);
+    cv::goodFeaturesToTrack(img, prevPoints, 500, 0.01, 1);
+}
+
+std::vector<cv::Point2f> purgePoints(std::vector<cv::Point2f>& points, std::vector<uchar>& status) {
+    std::vector<cv::Point2f> result;
+    for (int i = 0; i < points.size(); ++i) {
+        if (status[i] > 0)result.push_back(points[i]);
+    } return result;
+}
+
+void trackPoints()
+{
+    if (!prevInput.empty())
+    {
+        prevPoints = nextPoints;
+        if (!(prevPoints.size() > 0))
+        {
+            detectPoints(prevInput);
+            cout << nextPoints.size();
+            if (!(prevPoints.size() > 0))
+                return;
+        }
+        cv::calcOpticalFlowPyrLK(prevInput, nextInput, prevPoints, nextPoints, status, err);
+
+        purgePoints(nextPoints, status);
+        purgePoints(prevPoints, status);
+    }
+    
 }
 
 int main(int argc, char** argv)
@@ -43,7 +77,7 @@ int main(int argc, char** argv)
         return 1;
     }
 
-    Mat frame, frameCopy;
+    
     int frameWidth = cap.get(CAP_PROP_FRAME_WIDTH);
     int frameHeight = cap.get(CAP_PROP_FRAME_HEIGHT);
     float aspect_ratio = frameWidth / (float)frameHeight;
@@ -61,9 +95,9 @@ int main(int argc, char** argv)
     {
         double t = (double)cv::getTickCount();
 
-        cap >> frame;
-        frameCopy = frame.clone();
-        Mat inpBlob = blobFromImage(frame, 1.0 / 255, Size(inWidth, inHeight), Scalar(0, 0, 0), false, false);
+        cap >> nextInput;
+        frameCopy = nextInput.clone();
+        Mat inpBlob = blobFromImage(nextInput, 1.0 / 255, Size(inWidth, inHeight), Scalar(0, 0, 0), false, false);
 
         /*net.setInput(inpBlob);
 
@@ -108,27 +142,24 @@ int main(int argc, char** argv)
             circle(frame, partB, 8, Scalar(0, 0, 255), -1);
         }*/
 
-        cvtColor(frameCopy, frameCopy, COLOR_BGR2GRAY);
-        detectPoints(frameCopy);
-
+        cvtColor(nextInput, nextInput, COLOR_BGR2GRAY);
+        trackPoints();
+        prevInput = nextInput.clone();
+        cvtColor(nextInput, nextInput, COLOR_GRAY2BGR);
+        cout << nextPoints.size();
         for (size_t i = 0; i < prevPoints.size(); i++)
         {
-            circle(frame, prevPoints[i], 10, Scalar(0, 0, 255));
+            circle(nextInput, prevPoints[i], 10, Scalar(0, 0, 255));
+            line(nextInput, prevPoints[i], nextPoints[i], Scalar(0, 255, 0));
+            circle(nextInput, nextPoints[i], 10, Scalar(0, 0, 255));
         }
-
-        cvtColor(frameCopy, frame, COLOR_GRAY2BGR);
-        for (size_t i = 0; i < prevPoints.size(); i++)
-        {
-            circle(frame, prevPoints[i], 10, Scalar(0, 0, 255));
-        }
-        //circle(frame, prevPoints[0], 1, Scalar(0, 0, 255));
 
         t = ((double)cv::getTickCount() - t) / cv::getTickFrequency();
         cout << "Time Taken for frame = " << t << endl;
-        cv::putText(frame, cv::format("time taken = %.2f sec", t), cv::Point(50, 50), cv::FONT_HERSHEY_COMPLEX, .8, cv::Scalar(255, 50, 0), 2);
+        cv::putText(nextInput, cv::format("time taken = %.2f sec", t), cv::Point(50, 50), cv::FONT_HERSHEY_COMPLEX, .8, cv::Scalar(255, 50, 0), 2);
         // imshow("Output-Keypoints", frameCopy);
-        imshow("Output-Skeleton", frame);
-        video.write(frame);
+        imshow("Output-Skeleton", nextInput);
+        video.write(nextInput);
         char key = waitKey(1);
         if (key == 27)
             break;
