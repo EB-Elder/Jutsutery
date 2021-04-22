@@ -35,6 +35,104 @@ Mat nextInput, frameCopy;
 vector<uchar> status;
 vector<float> err;
 
+
+
+
+Net net = readNetFromCaffe(protoFile, weightsFile);
+
+//seuil ??
+float thresh = 0.01;
+
+//temps de traitement
+double t = 0;
+
+//timer
+typedef std::chrono::high_resolution_clock Clock;
+auto start = Clock::now();
+std::chrono::time_point<std::chrono::steady_clock>last_forward;
+
+bool first = true;
+
+Mat output;
+
+
+
+vector<float> getHand(Mat& img, int inWidth, int inHeight, int frameWidth, int frameHeight, nanoseconds ns)
+{
+
+    std::cout << "inWidth = " << inWidth << " ; inHeight = " << inHeight << endl;
+
+    if (first || ns.count() > 500000000)
+    {
+        Mat inpBlob = blobFromImage(img, 1.0 / 255, Size(inWidth, inHeight), Scalar(0, 0, 0), false, false);
+        net.setInput(inpBlob);
+
+        output = net.forward();
+        first = false;
+
+        last_forward = Clock::now();
+    }
+
+    t = (double)cv::getTickCount();
+
+    int H = output.size[2];
+    int W = output.size[3];
+
+    // find the position of the body parts
+    vector<Point> points(nPoints);
+    for (int n = 0; n < nPoints; n++)
+    {
+        // Probability map of corresponding body's part.
+        Mat probMap(H, W, CV_32F, output.ptr(0, n));
+        resize(probMap, probMap, Size(frameWidth, frameHeight));
+
+        Point maxLoc;
+        double prob;
+        minMaxLoc(probMap, 0, &prob, 0, &maxLoc);
+        if (prob > thresh)
+        {
+            circle(frameCopy, cv::Point((int)maxLoc.x, (int)maxLoc.y), 8, Scalar(0, 255, 255), -1);
+            cv::putText(frameCopy, cv::format("%d", n), cv::Point((int)maxLoc.x, (int)maxLoc.y), cv::FONT_HERSHEY_COMPLEX, 1, cv::Scalar(0, 0, 255), 2);
+
+        }
+        points[n] = maxLoc;
+    }
+
+    int nPairs = sizeof(POSE_PAIRS) / sizeof(POSE_PAIRS[0]);
+
+    Point2d barycentre(0.0f, 0.0f);
+
+    float minX = frameWidth;
+    float minY = frameHeight;
+    float maxX = 0.0f;
+    float maxY = 0.0f;
+
+    for (int n = 0; n < nPoints; n++)
+    {
+        if (points[n].x < minX) minX = points[n].x;
+        else
+        {
+            if (points[n].x > maxX) maxX = points[n].x;
+        }
+
+        if (points[n].y < minY) minY = points[n].y;
+        else
+        {
+            if (points[n].y > maxY) maxY = points[n].y;
+        }
+
+        barycentre.x = barycentre.x + points[n].x;
+        barycentre.y = barycentre.y + points[n].y;
+    }
+
+    barycentre.x = barycentre.x / (float)nPoints;
+    barycentre.y = barycentre.y / (float)nPoints;
+
+    circle(img, barycentre, 8, Scalar(0, 0, 255), -1);
+
+    return vector<float>{minX, minY, maxX, maxY};
+}
+
 void detectPoints(Mat& img)
 {
     cv::goodFeaturesToTrack(img, prevPoints, 500, 0.01, 1);
@@ -68,8 +166,7 @@ void trackPoints()
 
 int main(int argc, char** argv)
 {
-	//seuil ??
-    float thresh = 0.01;
+	
 
 	//flux vidéo
     cv::VideoCapture cap(1);
@@ -85,110 +182,39 @@ int main(int argc, char** argv)
     int frameHeight = cap.get(CAP_PROP_FRAME_HEIGHT);
     float aspect_ratio = frameWidth / (float)frameHeight;
 
-	//resize de l'image à traiter
+
     int inHeight = 300;
     int inWidth = (int(aspect_ratio * inHeight) * 8) / 8;
-
-    std::cout << "inWidth = " << inWidth << " ; inHeight = " << inHeight << endl;
+    
 
 	//écriture du résultat dans un fichier vidéo
     VideoWriter video("Output-Skeleton.avi", VideoWriter::fourcc('M', 'J', 'P', 'G'), 10, Size(frameWidth, frameHeight));
 
-    Net net = readNetFromCaffe(protoFile, weightsFile);
-	net.setPreferableTarget(cv::dnn::DNN_TARGET_OPENCL);
-	net.setPreferableBackend(cv::dnn::DNN_BACKEND_DEFAULT);
-
-	//temps de traitement
-    double t = 0;
-
-	//timer
-	typedef std::chrono::high_resolution_clock Clock;
-	auto start = Clock::now();
-	std::chrono::time_point<std::chrono::steady_clock>last_forward;
-
-	bool first = true;
-
-	Mat output;
+    
+    net.setPreferableTarget(cv::dnn::DNN_TARGET_OPENCL);
+    net.setPreferableBackend(cv::dnn::DNN_BACKEND_DEFAULT);
+	
 
 	//boucle de traitement
     while (1)
     {
 		//timer
-		auto time_newframe = Clock::now();
+        auto time_newframe = Clock::now();
 
-		nanoseconds ti = duration_cast<nanoseconds>(time_newframe - start);
-		nanoseconds ns = duration_cast<nanoseconds>(time_newframe - last_forward);
+        vector<float> hand;
+
+        nanoseconds ti = duration_cast<nanoseconds>(time_newframe - start);
+        nanoseconds ns = duration_cast<nanoseconds>(time_newframe - last_forward);
 
         cap >> nextInput;
         frameCopy = nextInput.clone();
 
-		if (first || ns.count() > 500000000)
-		{
-			Mat inpBlob = blobFromImage(nextInput, 1.0 / 255, Size(inWidth, inHeight), Scalar(0, 0, 0), false, false);
-			net.setInput(inpBlob);
+        float minX = 0.0f;
+        float minY = 0.0f;
+        float maxX = 0.0f;
+        float maxY = 0.0f;
 
-			output = net.forward();
-			first = false;
-
-			last_forward = Clock::now();
-		}      
-
-	    t = (double)cv::getTickCount();
-
-        int H = output.size[2];
-        int W = output.size[3];
-
-        // find the position of the body parts
-        vector<Point> points(nPoints);
-        for (int n = 0; n < nPoints; n++)
-        {
-            // Probability map of corresponding body's part.
-            Mat probMap(H, W, CV_32F, output.ptr(0, n));
-            resize(probMap, probMap, Size(frameWidth, frameHeight));
-
-            Point maxLoc;
-            double prob;
-            minMaxLoc(probMap, 0, &prob, 0, &maxLoc);
-            if (prob > thresh)
-            {
-                circle(frameCopy, cv::Point((int)maxLoc.x, (int)maxLoc.y), 8, Scalar(0, 255, 255), -1);
-                cv::putText(frameCopy, cv::format("%d", n), cv::Point((int)maxLoc.x, (int)maxLoc.y), cv::FONT_HERSHEY_COMPLEX, 1, cv::Scalar(0, 0, 255), 2);
-
-            }
-            points[n] = maxLoc;
-        }
-
-        int nPairs = sizeof(POSE_PAIRS) / sizeof(POSE_PAIRS[0]);
-
-		Point2d barycentre(0.0f, 0.0f);
-		float minX = frameWidth;
-		float minY = frameHeight;
-		float maxX = 0.0f;
-		float maxY = 0.0f;
-
-		for (int n = 0; n < nPoints; n++)
-		{
-			if (points[n].x < minX) minX = points[n].x;
-			else
-			{
-				if (points[n].x > maxX) maxX = points[n].x;
-			}
-
-			if (points[n].y < minY) minY = points[n].y;
-			else
-			{
-				if (points[n].y > maxY) maxY = points[n].y;
-			}
-
-			barycentre.x = barycentre.x + points[n].x;
-			barycentre.y = barycentre.y + points[n].y;
-		}
-
-		barycentre.x = barycentre.x / (float)nPoints;
-		barycentre.y = barycentre.y / (float)nPoints;
-
-		circle(nextInput, barycentre, 8, Scalar(0, 0, 255), -1);
-		rectangle(nextInput, Point2d(minX, minY), Point2d(maxX, maxY), Scalar(0, 0, 255), 8);
+		//rectangle(nextInput, Point2d(minX, minY), Point2d(maxX, maxY), Scalar(0, 0, 255), 8);
 
         /*for (int n = 0; n < nPairs; n++)
         {
@@ -204,7 +230,8 @@ int main(int argc, char** argv)
             circle(nextInput, partB, 8, Scalar(0, 0, 255), -1);
         }*/
       
-		cv::cvtColor(nextInput, nextInput, COLOR_BGR2GRAY);
+        //FEATURES
+		/*cv::cvtColor(nextInput, nextInput, COLOR_BGR2GRAY);
         trackPoints();
         prevInput = nextInput.clone();
         cv::cvtColor(nextInput, nextInput, COLOR_GRAY2BGR);
@@ -215,7 +242,33 @@ int main(int argc, char** argv)
             circle(nextInput, prevPoints[i], 10, Scalar(0, 0, 255));
             line(nextInput, prevPoints[i], nextPoints[i], Scalar(0, 255, 0));
             circle(nextInput, nextPoints[i], 10, Scalar(0, 0, 255));
-        }
+        }*/
+        cv::Mat mask = cv::Mat::zeros(nextInput.size(), nextInput.type());
+
+        cv::Mat nextInputCopy = nextInput.clone();
+
+        hand = getHand(nextInputCopy, inWidth, inHeight, frameWidth, frameHeight, ns);
+
+        minX = hand[0];
+        minY = hand[1];
+        maxX = hand[2];
+        maxY = hand[3];
+
+
+        rectangle(nextInputCopy, Point2d(minX, minY), Point2d(maxX, maxY), Scalar(0, 255, 0), -1);
+
+        //nextInput.copyTo(mask, nextInputCopy);
+
+        hand = getHand(nextInputCopy, inWidth, inHeight, frameWidth, frameHeight, ns);
+
+        minX = hand[0];
+        minY = hand[1];
+        maxX = hand[2];
+        maxY = hand[3];
+
+        rectangle(nextInputCopy, Point2d(minX, minY), Point2d(maxX, maxY), Scalar(0, 0, 255), -1);
+
+        nextInputCopy.copyTo(nextInput, nextInputCopy);
 
         t = ((double)cv::getTickCount() - t) / cv::getTickFrequency();
         //std::cout << "Time Taken for frame = " << t << endl;
